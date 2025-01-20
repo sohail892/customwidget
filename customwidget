@@ -1,0 +1,692 @@
+class CameraButton extends StatefulWidget {
+  const CameraButton({
+    super.key,
+    this.width,
+    this.height,
+  });
+
+  final double? width;
+  final double? height;
+
+  @override
+  State<CameraButton> createState() => _CameraButtonState();
+}
+class _CameraButtonState extends State<CameraButton> {
+  int _countdown = 5; // Countdown starting from 5
+  late Timer _timer; // Timer to handle the countdown
+
+  @override
+  void initState() {
+    super.initState();
+
+    // Start the countdown timer when the screen is opened
+    _startCountdown();
+  }
+
+  // Function to start the countdown timer
+  void _startCountdown() {
+    _timer = Timer.periodic(Duration(seconds: 1), (timer) {
+      if (_countdown > 0) {
+        setState(() {
+          _countdown--;
+        });
+      } else {
+        _timer.cancel();
+        _navigateToNextScreen();
+      }
+    });
+  }
+
+  // Function to navigate to the next screen
+  void _navigateToNextScreen() {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => Camera()),
+    );
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        FocusScope.of(context).unfocus();
+        FocusManager.instance.primaryFocus?.unfocus();
+      },
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: Stack(
+          children: [
+            BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 5.0, sigmaY: 5.0),
+              child: Container(
+                color: Colors.black.withOpacity(0.5),
+              ),
+            ),
+            // Your main content
+            Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Column(
+                    children: [
+                      GestureDetector(
+                        onTap: () {},
+                        child: Container(
+                          margin: EdgeInsets.all(30),
+                          decoration: BoxDecoration(
+                            color: Colors.transparent,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          padding: EdgeInsets.symmetric(vertical: 20, horizontal: 30),
+                          child: Column(
+                            children: [
+                              Icon(
+                                Icons.check_circle_rounded,
+                                size: 40,
+                                color: Colors.black, // Icon color remains black
+                              ),
+                              SizedBox(height: 10),
+                              Text(
+                                "Recording Starting in",
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  color: Colors.white, // Text color changed to white
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              SizedBox(height: 20),
+                              // Display the countdown timer
+                              Text(
+                                '$_countdown',
+                                style: TextStyle(
+                                  fontSize: 60,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white, // Text color changed to white
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  )
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+
+class Camera extends StatefulWidget {
+  const Camera({
+    super.key,
+    this.width,
+    this.height,
+  });
+
+  final double? width;
+  final double? height;
+
+  @override
+  State<Camera> createState() => _CameraScreenState();
+}
+
+class _CameraScreenState extends State<Camera> {
+  CameraController? _cameraController;
+  List<CameraDescription>? cameras;
+  bool _isRecording = false;
+  bool _isFlashOn = false;
+  bool showflip = true;
+  bool _isCameraInitialized = false;
+  Timer? _recordingTimer;
+  Timer? _timer;
+  Timer? _autoStopTimer;
+  int _elapsedSeconds = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeCamera();
+  }
+
+  Future<void> _initializeCamera([CameraDescription? camera]) async {
+    cameras = await availableCameras();
+    final cameraToUse = camera ??
+        cameras!.firstWhere(
+                (cam) => cam.lensDirection == CameraLensDirection.front);
+
+    _cameraController = CameraController(
+      cameraToUse,
+      ResolutionPreset.high,
+      enableAudio: true,
+    );
+
+    await _cameraController!.initialize();
+    setState(() {
+      _isCameraInitialized = true;
+    });
+  }
+
+  Future<void> _switchCamera() async {
+    if (_cameraController != null && _cameraController!.value.isInitialized) {
+      final currentCamera = _cameraController!.description;
+      final newCamera =
+      cameras?.firstWhere((camera) => camera != currentCamera);
+
+      setState(() {
+        _isCameraInitialized = false; // Temporarily unset while switching
+      });
+      await _initializeCamera(newCamera);
+    }
+  }
+
+  Future<void> _startRecording() async {
+    if (_cameraController != null && _cameraController!.value.isInitialized) {
+      await _cameraController!.startVideoRecording();
+      setState(() {
+        _isRecording = true;
+        showflip = false; // Hide flip button during recording
+      });
+      _startTimer();
+      _startAutoStopTimer(); // Start the auto-stop timer for 1 minute
+    }
+  }
+
+  Future<void> _stopRecording({bool autoStopped = false}) async {
+    if (_cameraController != null &&
+        _cameraController!.value.isRecordingVideo) {
+      _recordingTimer?.cancel();
+      _autoStopTimer?.cancel(); // Cancel the auto-stop timer
+      final videoFile = await _cameraController!.stopVideoRecording();
+      setState(() {
+        _isRecording = false;
+        showflip = true; // Show flip button after recording stops
+      });
+      _stopTimer();
+      Navigator.pop(context);
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => questions(videoFile: File(videoFile.path)),
+        ),
+      );
+
+
+
+    }
+  }
+
+  // Timer to automatically stop recording after 1 minute
+  void _startAutoStopTimer() {
+    _autoStopTimer = Timer(Duration(minutes: 1), () {
+      if (_isRecording) {
+        _stopRecording(autoStopped: true);
+      }
+    });
+  }
+
+  void _startTimer() {
+    _timer = Timer.periodic(Duration(seconds: 1), (_) {
+      setState(() => _elapsedSeconds++);
+    });
+  }
+
+  void _stopTimer() {
+    _timer?.cancel();
+    _elapsedSeconds = 0;
+  }
+
+  void _toggleFlash() async {
+    if (_cameraController != null && _cameraController!.value.isInitialized) {
+      setState(() => _isFlashOn = !_isFlashOn);
+      await _cameraController!.setFlashMode(
+        _isFlashOn ? FlashMode.torch : FlashMode.off,
+      );
+    }
+  }
+
+  String _formatTime(int seconds) {
+    final minutes = seconds ~/ 60;
+    final remainingSeconds = seconds % 60;
+    return '${minutes.toString().padLeft(2, '0')}:${remainingSeconds.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  void dispose() {
+    _cameraController?.dispose();
+    _recordingTimer?.cancel();
+    _autoStopTimer?.cancel(); // Cancel auto stop timer when disposing
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Stack(
+        children: [
+          if (_isCameraInitialized && _cameraController != null)
+            Positioned.fill(
+              child: CameraPreview(_cameraController!),
+            ),
+          if (_isRecording)
+            Positioned(
+              bottom: 65,
+              left: 20,
+              child: Container(
+                padding: EdgeInsets.symmetric(vertical: 5, horizontal: 10),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  _formatTime(_elapsedSeconds),
+                  style: TextStyle(color: Colors.white, fontSize: 20),
+                ),
+              ),
+            ),
+          Positioned(
+            top: 70,
+            left: 20,
+            child: Container(
+              height: 40,
+              width: 40,
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.5),
+                shape: BoxShape.circle,
+              ),
+              child: IconButton(
+                padding: EdgeInsets.all(0),
+                icon: Icon(Icons.close, color: Colors.white, size: 23),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 70,
+            right: 20,
+            child: Container(
+              height: 40,
+              width: 40,
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.5),
+                shape: BoxShape.circle,
+              ),
+              child: IconButton(
+                padding: EdgeInsets.all(0),
+                icon: Icon(
+                  _isFlashOn ? Icons.flash_on : Icons.flash_off,
+                  color: Colors.white,
+                  size: 23,
+                ),
+                onPressed: _toggleFlash,
+              ),
+            ),
+          ),
+          // Flip camera icon will only show if not recording
+          if (showflip)
+            Positioned(
+              bottom: 60,
+              right: 20,
+              child: Container(
+                height: 40,
+                width: 40,
+                decoration: BoxDecoration(
+                  color: Colors
+                      .transparent, // No background for flip icon when shown
+                  shape: BoxShape.circle,
+                ),
+                child: IconButton(
+                  padding: EdgeInsets.all(5),
+                  icon: Icon(Icons.flip_camera_android_outlined,
+                      color: Colors.white, size: 30),
+                  onPressed: _switchCamera,
+                ),
+              ),
+            ),
+          Positioned(
+            bottom: 50,
+            left: MediaQuery.of(context).size.width / 2 - 35,
+            child: GestureDetector(
+              onTap: _isRecording ? _stopRecording : _startRecording,
+              child: Container(
+                  height: 62,
+                  width: 62,
+                  padding: EdgeInsets.all(_isRecording ? 15 : 2.5),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(width: 3, color: Colors.red),
+                  ),
+                  child: Container(
+                    height: _isRecording ? 30 : 50,
+                    width: _isRecording ? 30 : 50,
+                    decoration: BoxDecoration(
+                        borderRadius:
+                        BorderRadius.circular(_isRecording ? 10 : 2000),
+                        color: Colors.red),
+                  )),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+
+
+class questions extends StatefulWidget{
+
+   questions({
+    super.key,
+    this.width,
+    this.height,
+    this.actionToCall,
+   required this.videoFile,
+  });
+
+  var videoFile;
+  final double? width;
+  final double? height;
+  final Future Function(String? url)? actionToCall;
+
+  @override
+  State<questions> createState() => _questionsState();
+}
+
+
+class _questionsState extends State<questions>
+    with SingleTickerProviderStateMixin {
+  final scaffoldKey = GlobalKey<ScaffoldState>();
+  late AnimationController _controller;
+
+  CameraController? cameraController;
+
+  double _uploadProgress = 0.0;
+
+  var urlvideo;
+
+  Future<void> uploadVideo(File videoFile) async {
+    final String apiUrl = "https://app.fronthouz.com/version-test/api/1.1/wf/get_uploaded_video_url";
+    // final String token = 'Bearer ${widget.token ?? ''}';
+    final String token = 'Bearer 7e1a481466de63436ea3530fb2552c45';
+
+    Dio dio = Dio();
+
+    try {
+      setState(() {
+        _uploadProgress = 0.0;
+        waituuntilresponse = false;
+        urlvideo = null;
+      });
+      // Extract the file extension to determine the file format
+      String fileExtension = path.extension(videoFile.path);
+
+      // Send the file using POST request with progress callback
+      Response response = await dio.post(
+        apiUrl,
+        data: jsonEncode({
+          'answerVideo': {
+            "filename": 'answer.mp4',
+            "private": false,
+            "contents": base64Encode(await videoFile.readAsBytes())
+          }
+        }),
+        options: Options(
+          headers: {
+            'Authorization': token,
+            'Content-Type': 'application/json;charset=UTF-8',
+            "User-Agent":
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko)"
+          },
+        ),
+        onSendProgress: (int sent, int total) {
+          setState(() {
+            _uploadProgress = sent / total; // Update the progress in UI
+          });
+        },
+      );
+
+      setState(() {
+        waituuntilresponse = true;
+      });
+
+      if (response.statusCode == 200) {
+        if (response.data is Map<String, dynamic>) {
+          final responseData = response.data as Map<String, dynamic>;
+          final videoUrl = responseData['fileUrl'] as String?;
+          if (videoUrl != null) {
+            urlvideo = videoUrl;
+            if (widget.actionToCall != null) {
+              await widget.actionToCall!(videoUrl);
+            }
+            showFailureSnackbar(context, 'Video uploaded successfully!');
+          } else {
+            setState(() {
+              waituuntilresponse = true;
+            });
+            showFailureSnackbar(context, 'Invalid response format.');
+          }
+        } else {
+          setState(() {
+            waituuntilresponse = true;
+          });
+          showFailureSnackbar(context, 'Unexpected response format.');
+        }
+      } else {
+        showFailureSnackbar(context, 'An error occurred while uploading!');
+        setState(() {
+          waituuntilresponse = true;
+        });
+      }
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.sendTimeout) {
+        showFailureSnackbar(context,
+            'Request timed out. Please check your connection and try again.');
+      } else if (e.type == DioExceptionType.connectionError) {
+        setState(() {
+          waituuntilresponse = true;
+        });
+        showFailureSnackbar(
+            context, 'No internet connection. Please try again.');
+      }
+      else if (e.type == DioExceptionType.unknown) {
+        print("The Unknown error is  this : $e");
+        print('>>>>>>>>>>');
+        print(e);
+        print('<<<<<<<<<<<<<');
+        // print(widget.versionUrl ?? 'no url??');
+        setState(() {
+          waituuntilresponse = true;
+        });
+        showFailureSnackbar(
+            context, 'Your video could not be saved. Please try again');
+      }
+      else {
+        setState(() {
+          waituuntilresponse = true;
+        });
+        showFailureSnackbar(context, 'Error uploading video: ${e.message}');
+      }
+    }
+
+    catch (e) {
+      setState(() {
+        waituuntilresponse = true;
+      });
+      showFailureSnackbar(context, 'An unexpected error occurred!');
+    }
+  }
+
+  void showFailureSnackbar(BuildContext context, String message) {
+    final snackBar = SnackBar(
+      content: Text(
+        message,
+        style: TextStyle(color: Colors.white),
+      ),
+      behavior: SnackBarBehavior.floating,
+      margin: const EdgeInsets.all(16),
+      backgroundColor: Colors.redAccent,
+    );
+
+    ScaffoldMessenger.of(context).showSnackBar(snackBar);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    uploadVideo(widget.videoFile);
+    _controller = AnimationController(
+      vsync: this,
+      duration: Duration(seconds: 2),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  bool wenttocamera = false;
+
+
+  var waituuntilresponse = false;
+
+  @override
+  Widget build(BuildContext context) {
+    // context.watch<FFAppState>();
+    var height = MediaQuery.of(context).size.height;
+    var width = MediaQuery.of(context).size.width;
+    return GestureDetector(
+      onTap: () {
+        FocusScope.of(context).unfocus();
+        FocusManager.instance.primaryFocus?.unfocus();
+      },
+      child: Scaffold(
+        key: scaffoldKey,
+        backgroundColor: Colors.white,
+        body: Container(
+          color: Colors.transparent,
+          child: Column(
+            children: [
+
+
+                        Container(
+                          padding: EdgeInsets.only(top: 45,left: 10,right: 10,bottom: 10),
+                          color: Colors.white,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              GestureDetector(
+                                onTap: () {
+                                  Navigator.pop(context);
+                                },
+                                child: Container(
+                                  padding: EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(1000),
+                                  ),
+                                  child: Icon(
+                                    CupertinoIcons.back,
+                                    size: 0,
+                                    color: Colors.blueGrey.shade800,
+                                  ),
+                                ),
+                              ),
+
+                              Text(
+                                "Boarding screen",
+                                style: GoogleFonts.dmSans(
+                                  fontSize: 18.sp,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.black,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text("")
+                            ],
+                          ),
+                        ),
+
+              SizedBox(
+                height: height*0.2,
+              ),
+
+                    Image.asset("assets/icons/Video upload-bro.png",height: 300,width: 300,fit: BoxFit.cover,),
+
+                    SizedBox(height: 20,),
+
+                    Text("Uploading... questions [1] of 3",style: TextStyle(color: Colors.black,fontSize: 20,fontWeight: FontWeight.bold,),),
+
+
+
+              if (widget.videoFile != null &&
+                  _uploadProgress < 1.0 &&
+                  !waituuntilresponse)
+                Column(
+                  children: [
+                    SizedBox(height: 8),
+                    Stack(
+                      children: [
+                        SizedBox(
+                          height: 70,
+                          width: 70,
+                          child: CircularProgressIndicator(
+                            value: _uploadProgress,
+                            strokeCap: StrokeCap.round,
+                            strokeWidth: 5,
+                            valueColor: AlwaysStoppedAnimation(
+                              Colors.black,
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          top: 26.5,
+                          left: 13,
+                          right: 0,
+                          child: Text(
+                            "${(_uploadProgress * 100).toStringAsFixed(1)}%",
+                            style: TextStyle(
+                              color: Colors.black,
+                              fontWeight: FontWeight.w500,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 10),
+                    Text(
+                      "Processing...",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w500,
+                        fontSize: 18,
+                      ),
+                    ),
+                  ],
+                ),
+
+                ],
+          ),
+        ),
+      ),
+    );
+  }
+}
